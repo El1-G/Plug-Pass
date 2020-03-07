@@ -33,12 +33,17 @@ RTC_DS3231 rtc;
 
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 
+int relayPin = 12;
+
+uint32_t chargeEnd;
+
 void setup () {
 /*
 #ifndef ESP8266
   while (!Serial); // for Leonardo/Micro/Zero
 #endif
 */
+  pinMode(relayPin, OUTPUT);
   Serial.begin(9600);
 
   #if defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32)
@@ -51,7 +56,16 @@ void setup () {
     Serial.println("Couldn't find RTC");
     while (1);
   }
+  GetChargeEndTime();
 
+  if(chargeEnd > rtc.now().unixtime())
+  {
+    digitalWrite(relayPin, HIGH);
+    delay(3000);
+    digitalWrite(relayPin,LOW);
+  }
+
+  
   nfc.begin();
 
   uint32_t versiondata = nfc.getFirmwareVersion();
@@ -63,39 +77,46 @@ void setup () {
   // configure board to read RFID tags
   nfc.SAMConfig();
 
-  if (rtc.lostPower()) {
+  if (rtc.lostPower())
+  {
     Serial.println("RTC lost power, lets set the time!");
     // following line sets the RTC to the date & time this sketch was compiled
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-    // This line sets the RTC with an explicit date & time, for example to set
-    // January 21, 2014 at 3am you would call:
-    // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
   }
-  else // More Eli code if the rtc is a reliable provider of datetime
+  else // rtc is a reliable provider of datetime
   {
-    if(GetChargeEndTime() > rtc.now().unixtime())
+    if(chargeEnd > rtc.now().unixtime())
     {
       Serial.println("Charge End in future, Continuing charging");  
-      Serial.print("Current time ");
-      Serial.print(rtc.now().unixtime());
-      Serial.println();
+      Serial.print("Current rtc time ");
+      
+      PrintDateTime(rtc.now());
+      
       Serial.print("Charge end time ");
-      Serial.print(GetChargeEndTime());
-      Serial.println();
+      PrintDateTime(chargeEnd);
+      
+
     }
     else
     {
       Serial.println("Last charge ended before restart");
+      Serial.print("Last charge end time ");
+
+      PrintDateTime(chargeEnd);
+     
+      Serial.println("Current rtc time ");
+      PrintDateTime(rtc.now());
+
+
     }
   }
 }
 
 int chargeEndAddress = 0;
-uint32_t chargeEnd;
 
 uint32_t GetChargeEndTime()
 {
-  return EEPROM.get(chargeEndAddress, chargeEnd);
+  EEPROM.get(chargeEndAddress, chargeEnd);
 }
 
 // Adds 8 hours to current time and sets it in eeprom to address 0 length of 32 bits
@@ -110,6 +131,11 @@ void SetChargeEndTime()
 
 void loop () {
 
+  if(chargeEnd < rtc.now().unixtime())
+  {
+    digitalWrite(relayPin, LOW);
+  }
+
   Serial.println("Please scan a card");
    uint8_t success;
   uint8_t uid[] = { 0, 0, 0, 0, 0, 0, 0 };  // Buffer to store the returned UID
@@ -122,12 +148,18 @@ void loop () {
   if (success) {
     // Display some basic information about the card
     Serial.println("Found an ISO14443A card");
-    Serial.println("We'll update the charge time despite not yet validating the card");
-    SetChargeEndTime();
 
+    Serial.println("We'll update the charge time despite not yet validating the card for now...");
+    
+    Serial.print("Current rtc time ");
+    PrintDateTime(rtc.now());
+   
+    SetChargeEndTime();
     Serial.print("Current charge end time is ");
-    Serial.print(GetChargeEndTime());
-    Serial.println();
+    PrintDateTime(chargeEnd);
+
+    digitalWrite(relayPin, HIGH);
+
     Serial.print("  UID Length: ");Serial.print(uidLength, DEC);Serial.println(" bytes");
     Serial.print("  UID Value: ");
     nfc.PrintHex(uid, uidLength);
@@ -197,54 +229,33 @@ void loop () {
     Serial.flush();    
   }
   else 
-    {
-      Serial.println("ahhhhhhhhhhhhh");
-    }
-    DateTime now = rtc.now();
 
-    Serial.print(now.year(), DEC);
-    Serial.print('/');
-    Serial.print(now.month(), DEC);
-    Serial.print('/');
-    Serial.print(now.day(), DEC);
-    Serial.print(" (");
-    Serial.print(daysOfTheWeek[now.dayOfTheWeek()]);
-    Serial.print(") ");
-    Serial.print(now.hour(), DEC);
-    Serial.print(':');
-    Serial.print(now.minute(), DEC);
-    Serial.print(':');
-    Serial.print(now.second(), DEC);
-    Serial.println();
+  {
+      Serial.println("nfc.readPassiveTargetID Failed");
+  }
+    
+  PrintDateTime(rtc.now());
+    
+  Serial.println();
 
-    Serial.print(" since midnight 1/1/1970 = ");
-    Serial.print(now.unixtime());
-    Serial.print("s = ");
-    Serial.print(now.unixtime() / 86400L);
-    Serial.println("d");
-
-    // calculate a date which is 7 days and 30 seconds into the future
-    DateTime future (now + TimeSpan(7,12,30,6));
-
-    Serial.print(" now + 7d + 30s: ");
-    Serial.print(future.year(), DEC);
-    Serial.print('/');
-    Serial.print(future.month(), DEC);
-    Serial.print('/');
-    Serial.print(future.day(), DEC);
-    Serial.print(' ');
-    Serial.print(future.hour(), DEC);
-    Serial.print(':');
-    Serial.print(future.minute(), DEC);
-    Serial.print(':');
-    Serial.print(future.second(), DEC);
-    Serial.println();
-
-    Serial.print("Temperature: ");
-    Serial.print(rtc.getTemperature());
-    Serial.println(" C");
-
-    Serial.println();
     
   delay(3000);
+}
+
+void PrintDateTime(DateTime time)
+{
+  Serial.print(time.year(), DEC);
+      Serial.print('/');
+      Serial.print(time.month(), DEC);
+      Serial.print('/');
+      Serial.print(time.day(), DEC);
+      Serial.print(" (");
+      Serial.print(daysOfTheWeek[time.dayOfTheWeek()]);
+      Serial.print(") ");
+      Serial.print(time.hour(), DEC);
+      Serial.print(':');
+      Serial.print(time.minute(), DEC);
+      Serial.print(':');
+      Serial.print(time.second(), DEC);
+      Serial.println();
 }
